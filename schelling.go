@@ -1,0 +1,241 @@
+package main
+
+// Schelling 1D Model
+// Ported from Python to Go
+// Stefan McCabe
+// Version 0.1: 9/3/2015
+
+// This is an implementation of the one-dimensional Schelling segregation model, developed
+// as practice writing ABMs in Go and to test possible optimizations.  It builds on an
+// implementation of the 1-D Schelling model I wrote in Python in early 2015. When writing
+// that model, I generally adhered to the formalized version of the model described in the
+// following citation:
+//
+// Brandt, C., Immorlica, N., Kamath, G., & Kleinberg, R. (2012).
+// An analysis of one-dimensional Schelling segregation.
+// In STOC ’12 Proceedings of the forty-fourth annual ACM symposium
+// on theory of computing (p. 789). ACM Press.
+// doi:10.1145/2213977.2214048
+
+import (
+	"encoding/csv"
+	"fmt"
+	"github.com/grd/stat"
+	"log"
+	"math"
+	"math/rand"
+	"os"
+)
+
+// global variables
+var w *csv.Writer // trying this up here for scope reasons
+var verbose bool = false
+var writeToFile bool = true
+var vision int // vision needs to be a global
+var tolerance float64
+var filename string = "output.csv" // TODO: hardcording the filename for now, fix later
+
+func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
+	// Set up environment, perform the desired number of runs,
+	// and output summary statistics
+	// TODO: This function is doing a lot of work.
+
+	// setup measurement variables
+	successes := 0
+	times := make(stat.IntSlice, numRuns)
+	initGroups := make(stat.IntSlice, numRuns)
+	finalGroups := make(stat.IntSlice, numRuns)
+
+	// open file if necessary
+	if writeToFile {
+		f, err := os.Create(filename)
+		defer f.Close()
+		w = csv.NewWriter(f)
+		err = w.Write([]string{"size", "vision", "tolerance", "init.blocks", "final.blocks", "ticks"})
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	// execute runs
+	for run := 0; run < numRuns; run += 1 {
+		//model setup
+		model := setup(size)
+		initGroups[run] = countDistinct(model)
+		ticks := int64(0)
+		if verbose {
+			fmt.Println(model)
+			fmt.Printf("%d distinct groups at start\n", initGroups[run])
+		}
+
+		// model run
+		for !isConverged(model) {
+			step(model)
+			ticks += 1
+			if int64(ticks) > int64(500*len(model)) { // arbitary number to avoid infinite loops
+				if verbose {
+					fmt.Println("Model failed to stabilize")
+				}
+				break
+			}
+		}
+
+		if isConverged(model) {
+			finalGroups[run] = countDistinct(model)
+			if verbose {
+				fmt.Printf("%d distinct groups at end after %d moves\n", finalGroups[run], ticks)
+			}
+			times[run] = ticks
+			successes += 1
+		}
+
+		// write to file
+		if writeToFile {
+			w.Write([]string{fmt.Sprint(size), fmt.Sprint(vision), fmt.Sprint(tolerance), fmt.Sprint(initGroups[run]), fmt.Sprint(finalGroups[run]), fmt.Sprint(times[run])})
+
+			w.Flush()
+			err := w.Error()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+
+	// output statistics to console
+	fmt.Println("Summary statistics:")
+	fmt.Printf("%d runs reach equilibrium (%.1f%%) in %.1f ticks (s.d.: %.1f)\n", successes,
+		100*float64(successes)/float64(numRuns), stat.Mean(times), stat.Sd(times))
+
+	fmt.Printf("%.1f average initial groups (s.d.: %.1f)\n", stat.Mean(initGroups), stat.Sd(initGroups))
+	// fmt.Printf("DEBUG: initGroups: %v\n", initGroups)
+	fmt.Printf("%.1f average final groups (s.d.: %.1f)\n", stat.Mean(finalGroups), stat.Sd(finalGroups))
+	// fmt.Printf("DEBUG: initGroups: %v\n", finalGroups)
+
+	return
+}
+
+func countDistinct(model []float64) int64 {
+	// Identify coherent subpopulations, what Brandt et al
+	// call "firewalls."
+
+	val := model[0]
+	x := int64(0)
+
+	for _, element := range model {
+		if val != element {
+			val = element
+			x += 1
+		}
+	}
+	if model[0] == model[len(model)-1] {
+		x -= 1
+	}
+	return x
+}
+
+func setup(size int) []float64 {
+	// Return an initialized 1-D Schelling model, a slice of ints limited
+	// to the range [0, 1] of an arbitary size.
+	model := make([]float64, size)
+	for i := range model {
+		model[i] = float64(rand.Intn(2))
+	}
+	return model
+}
+
+func isConverged(model []float64) bool {
+	// Return true if all agents in the model are happy, else return false.
+	for idx := range model {
+		if !isHappy(model, idx) {
+			return false
+		}
+	}
+	return true
+}
+
+func isHappy(model []float64, idx int) bool {
+	// Return true if the proportion of nearby agents of the same type is greater than or equal to
+	// its tolerance threshold. The number of agents examined is given by the vision global variable.
+
+	count := 0
+	for x := 1; x <= vision; x += 1 {
+		y := int(math.Mod(float64(idx-x), float64(len(model))))
+		if y < 0 {
+			y += len(model)
+		}
+		count += int(model[y])
+
+		y = int(math.Mod(float64(idx+x), float64(len(model))))
+		if y < 0 {
+			y += len(model)
+		}
+		count += int(model[y])
+	}
+
+	if model[idx] == 0 { //invert for agents of type zero
+		count = 2*vision - count
+	}
+
+	neighbors := float64(count) / float64((2 * vision))
+	if neighbors < tolerance {
+		return false
+	}
+	return true
+}
+
+func step(model []float64) {
+	// Using random activation, find an unhappy agent and
+	// tell it to move.
+
+	idx := rand.Intn(len(model)) // might need to be len - 1?
+
+	// cycle until you find an unhappy agent
+	for isHappy(model, idx) {
+		idx = rand.Intn(len(model))
+	}
+	move(model, idx)
+}
+
+func move(model []float64, idx int) {
+	// Move an unhappy agent to new places in the model at random until it is happy.
+	// TODO: IIRC, this is slightly more random than the Brandt model. Update comment with clarification.
+	tries := 0
+	unhappy := true
+
+	// arbitary number of tries to avoid infinite loops
+	for unhappy && tries < (2*len(model)) {
+
+		val := model[idx]                             // store the agent type
+		model = append(model[:idx], model[idx+1:]...) // delete the model index
+		idx = rand.Intn(len(model))                   // randomly generate a new index
+
+		// the next three lines insert the agent into the new index
+		model = append(model, 0)
+		copy(model[idx+1:], model[idx:])
+		model[idx] = val
+
+		tries += 1
+		unhappy = !isHappy(model, idx) // evaluate the agent's happiness at the new location
+	}
+}
+
+func main() {
+	// initialize model variables from console input
+	// TODO: clean this up
+	// TODO: flags would be nicer
+
+	var numAgents, numRuns int
+	fmt.Print("Number of agents:\t")
+	fmt.Scanln(&numAgents) // TODO: validate input
+	fmt.Printf("numAgents is %d\n", numAgents)
+	fmt.Print("Agent vision:\t\t")
+	fmt.Scanln(&vision)
+	fmt.Printf("vision is %d\n", vision)
+	fmt.Print("Tolerance:\t\t")
+	fmt.Scanln(&tolerance)
+	fmt.Printf("tolerance is %.2f\n", tolerance)
+	fmt.Print("Number of runs:\t")
+	fmt.Scanln(&numRuns)
+	fmt.Printf("numRuns is %d\n", numRuns)
+	aggregateRuns(numRuns, numAgents, vision, tolerance, verbose)
+}
