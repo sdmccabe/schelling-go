@@ -3,7 +3,6 @@ package main
 // Schelling 1D Model
 // Ported from Python to Go
 // Stefan McCabe
-// Version 0.1: 9/3/2015
 
 // This is an implementation of the one-dimensional Schelling segregation model, developed
 // as practice writing ABMs in Go and to test possible optimizations.  It builds on an
@@ -28,10 +27,10 @@ import (
 )
 
 // global variables
-var w *csv.Writer // trying this up here for scope reasons
+var w *csv.Writer
 var verbose bool = false
 var writeToFile bool = true
-var vision int // vision needs to be a global
+var vision int
 var tolerance float64
 var filename string = "output.csv" // TODO: hardcording the filename for now, fix later
 
@@ -198,6 +197,7 @@ func step(model []float64) {
 
 func move(model []float64, idx int) {
 	// Move an unhappy agent to new places in the model at random until it is happy.
+	// TODO: Some method of tracking unhappy users could reduce randomness here.
 	// TODO: IIRC, this is slightly more random than the Brandt model. Update comment with clarification.
 	tries := 0
 	unhappy := true
