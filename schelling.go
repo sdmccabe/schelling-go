@@ -25,6 +25,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"sync"
 )
 
 // declare data types
@@ -51,6 +52,7 @@ var writeToFile = true
 var vision int
 var tolerance float64
 var filename string
+var parallel bool
 
 func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	// Set up environment, perform the desired number of runs,
@@ -64,6 +66,9 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	initGroups := make(stat.IntSlice, numRuns)  //only used for stat
 	finalGroups := make(stat.IntSlice, numRuns) //only used for stat
 	results := make(modelRuns, numRuns)         //aggregate model outcomes
+
+	// setup WaitGroup
+	var wg sync.WaitGroup
 
 	// open file if necessary
 	if writeToFile {
@@ -82,10 +87,22 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 
 	// execute runs
 	for run := 0; run < numRuns; run++ {
-		if results.executeModel(run, size) {
-			successes++
+		if parallel {
+			wg.Add(1)
+			go func(x, y int) {
+				defer wg.Done()
+				if results.executeModel(x, y) {
+					successes++
+				}
+			}(run, size)
+		} else {
+			if results.executeModel(run, size) {
+				successes++
+			}
 		}
 	}
+
+	wg.Wait() // wait for all model runs to end before computing statistics
 
 	// populating IntSlices for statistics
 	for i := 0; i < len(results); i++ {
@@ -154,6 +171,8 @@ func (s modelRuns) executeModel(run, size int) bool {
 			log.Fatal(err)
 		}
 	}
+
+	//fmt.Printf("finished run %d\n", run+1) //debugging statement: confirm asynchrony
 	return success
 }
 
@@ -278,6 +297,7 @@ func main() {
 	flag.Float64Var(&tolerance, "t", 0, "agent tolerance")
 	flag.BoolVar(&verbose, "v", false, "verbose console output")
 	flag.StringVar(&filename, "o", "", "filename to write to, if necessary")
+	flag.BoolVar(&parallel, "p", true, "set to false to run single-threaded")
 	flag.Parse()
 
 	// input validation
