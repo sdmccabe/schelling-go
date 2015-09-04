@@ -18,6 +18,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"github.com/grd/stat"
 	"log"
@@ -26,7 +27,8 @@ import (
 	"os"
 )
 
-type ModelRun struct {
+// declare data types
+type modelRun struct {
 	runNumber   int
 	size        int
 	vision      int
@@ -36,31 +38,32 @@ type ModelRun struct {
 	ticks       int64
 }
 
-func (r ModelRun) String() string {
+func (r modelRun) String() string {
 	return fmt.Sprintf("%d,%d,%d,%f,%d,%d,%d", r.runNumber, r.size, r.vision, r.tolerance, r.initGroups, r.finalGroups, r.ticks)
 }
 
-type ModelRuns []ModelRun
+type modelRuns []modelRun
 
-// global variables
+// declare global variables
 var w *bufio.Writer
 var verbose bool = false
 var writeToFile bool = true
 var vision int
 var tolerance float64
-var filename string = "output.csv" // TODO: hardcording the filename for now, fix later
+var filename string
 
 func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	// Set up environment, perform the desired number of runs,
 	// and output summary statistics
-	// TODO: This function is doing a lot of work.
+	// TODO: This function is doing a lot of work, individual model runs
+	// could probably be shunted into a modelRun() function.
 
 	// setup measurement variables
 	successes := 0
 	times := make(stat.IntSlice, numRuns)       //only used for stat
 	initGroups := make(stat.IntSlice, numRuns)  //only used for stat
 	finalGroups := make(stat.IntSlice, numRuns) //only used for stat
-	results := make([]ModelRun, numRuns)        //aggregate model outcomes
+	results := make([]modelRun, numRuns)        //aggregate model outcomes
 
 	// open file if necessary
 	if writeToFile {
@@ -70,7 +73,8 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 		w = bufio.NewWriter(f)
 		defer w.Flush()
 
-		_, err = w.WriteString("run,size,vision,tolerance,init.blocks,final.blocks,ticks")
+		//TODO: Writing csv headers is very fragile, see if this can be improved.
+		_, err = w.WriteString("run,size,vision,tolerance,init.blocks,final.blocks,ticks\n")
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -80,7 +84,7 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	for run := 0; run < numRuns; run += 1 {
 		//model setup
 		model := setup(size)
-		r := ModelRun{
+		r := modelRun{
 			runNumber:   run + 1,
 			size:        size,
 			vision:      vision,
@@ -145,8 +149,7 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 }
 
 func countDistinct(model []float64) int64 {
-	// Identify coherent subpopulations, what Brandt et al
-	// call "firewalls."
+	// Identify coherent subpopulations, what Brandt et al call "firewalls."
 
 	val := model[0]
 	x := int64(0)
@@ -182,6 +185,7 @@ func isConverged(model []float64) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -204,7 +208,7 @@ func isHappy(model []float64, idx int) bool {
 		count += int(model[y])
 	}
 
-	if model[idx] == 0 { //invert for agents of type zero
+	if model[idx] == 0 { // invert for agents of type zero
 		count = 2*vision - count
 	}
 
@@ -255,19 +259,40 @@ func move(model []float64, idx int) {
 
 func main() {
 	// initialize model variables from console input
-	// TODO: clean this up
-	// TODO: flags would be nicer
-
 	var numAgents, numRuns int
 
-	fmt.Print("Number of agents:\t")
-	fmt.Scanln(&numAgents) // TODO: validate input
-	fmt.Print("Agent vision:\t\t")
-	fmt.Scanln(&vision)
-	fmt.Print("Tolerance:\t\t")
-	fmt.Scanln(&tolerance)
-	fmt.Print("Number of runs:\t")
-	fmt.Scanln(&numRuns)
+	flag.IntVar(&numAgents, "s", 0, "number of agents in the model")
+	flag.IntVar(&numRuns, "n", 0, "number of model runs")
+	flag.IntVar(&vision, "w", 0, "neighborhood size")
+	flag.Float64Var(&tolerance, "t", 0, "agent tolerance")
+	flag.BoolVar(&verbose, "v", false, "verbose console output")
+	flag.StringVar(&filename, "o", "", "filename to write to, if necessary")
+	flag.Parse()
+
+	// input validation
+	if numAgents <= 0 {
+		fmt.Println("Please enter the number of agents to simulate.")
+		os.Exit(1)
+	}
+	if numRuns <= 0 {
+		fmt.Println("Please enter the number of model runs to be performed.")
+		os.Exit(1)
+	}
+	if vision <= 0 {
+		fmt.Println("Please enter the desired neighborhood size.")
+		os.Exit(1)
+	}
+	if tolerance <= 0 || tolerance >= 1 {
+		fmt.Println("Error: tolerance must be a decimal greater than zero and less than one.")
+		os.Exit(1)
+	}
+	if filename == "" {
+		writeToFile = false
+	}
+	if vision > numAgents {
+		fmt.Println("Error: vision cannot be greater than the number of agents.")
+		os.Exit(1)
+	}
 
 	aggregateRuns(numRuns, numAgents, vision, tolerance, verbose)
 }
