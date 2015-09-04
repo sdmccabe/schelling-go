@@ -46,8 +46,8 @@ type modelRuns []modelRun
 
 // declare global variables
 var w *bufio.Writer
-var verbose bool = false
-var writeToFile bool = true
+var verbose = false
+var writeToFile = true
 var vision int
 var tolerance float64
 var filename string
@@ -81,7 +81,7 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	}
 
 	// execute runs
-	for run := 0; run < numRuns; run += 1 {
+	for run := 0; run < numRuns; run++ {
 		//model setup
 		model := setup(size)
 		r := modelRun{
@@ -102,7 +102,7 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 		// model run
 		for !isConverged(model) {
 			step(model)
-			ticks += 1
+			ticks++
 			if int64(ticks) > int64(500*len(model)) { // arbitary number to avoid infinite loops
 				if verbose {
 					fmt.Println("Model failed to stabilize")
@@ -117,7 +117,7 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 				fmt.Printf("%d distinct groups at end after %d moves\n", r.finalGroups, ticks)
 			}
 			r.ticks = ticks
-			successes += 1
+			successes++
 		}
 
 		results[run] = r //add run outcomes to total results
@@ -157,11 +157,11 @@ func countDistinct(model []float64) int64 {
 	for _, element := range model {
 		if val != element {
 			val = element
-			x += 1
+			x++
 		}
 	}
 	if model[0] == model[len(model)-1] {
-		x -= 1
+		x--
 	}
 	return x
 }
@@ -194,7 +194,7 @@ func isHappy(model []float64, idx int) bool {
 	// its tolerance threshold. The number of agents examined is given by the vision global variable.
 
 	count := 0
-	for x := 1; x <= vision; x += 1 {
+	for x := 1; x <= vision; x++ {
 		y := int(math.Mod(float64(idx-x), float64(len(model))))
 		if y < 0 {
 			y += len(model)
@@ -252,7 +252,7 @@ func move(model []float64, idx int) {
 		copy(model[idx+1:], model[idx:])
 		model[idx] = val
 
-		tries += 1
+		tries++
 		unhappy = !isHappy(model, idx) // evaluate the agent's happiness at the new location
 	}
 }
