@@ -145,6 +145,7 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 		100*float64(successes)/float64(numRuns), stat.Mean(times), stat.Sd(times))
 	fmt.Printf("%.1f average initial groups (s.d.: %.1f)\n", stat.Mean(initGroups), stat.Sd(initGroups))
 	fmt.Printf("%.1f average final groups (s.d.: %.1f)\n", stat.Mean(finalGroups), stat.Sd(finalGroups))
+
 	return
 }
 
@@ -160,9 +161,11 @@ func countDistinct(model []float64) int64 {
 			x++
 		}
 	}
-	if model[0] == model[len(model)-1] {
+
+	if model[0] == model[len(model)-1] { // wrap around
 		x--
 	}
+
 	return x
 }
 
@@ -286,12 +289,12 @@ func main() {
 		fmt.Println("Error: tolerance must be a decimal greater than zero and less than one.")
 		os.Exit(1)
 	}
-	if filename == "" {
-		writeToFile = false
-	}
 	if vision > numAgents {
 		fmt.Println("Error: vision cannot be greater than the number of agents.")
 		os.Exit(1)
+	}
+	if filename == "" {
+		writeToFile = false
 	}
 
 	aggregateRuns(numRuns, numAgents, vision, tolerance, verbose)
