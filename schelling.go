@@ -12,12 +12,12 @@ package main
 //
 // Brandt, C., Immorlica, N., Kamath, G., & Kleinberg, R. (2012).
 // An analysis of one-dimensional Schelling segregation.
-// In STOC ’12 Proceedings of the forty-fourth annual ACM symposium
+// In STOC '12 Proceedings of the forty-fourth annual ACM symposium
 // on theory of computing (p. 789). ACM Press.
 // doi:10.1145/2213977.2214048
 
 import (
-	"encoding/csv"
+	"bufio"
 	"fmt"
 	"github.com/grd/stat"
 	"log"
@@ -26,8 +26,24 @@ import (
 	"os"
 )
 
+type ModelRun struct {
+	runNumber   int
+	size        int
+	vision      int
+	tolerance   float64
+	initGroups  int64
+	finalGroups int64
+	ticks       int64
+}
+
+func (r ModelRun) String() string {
+	return fmt.Sprintf("%d,%d,%d,%f,%d,%d,%d", r.runNumber, r.size, r.vision, r.tolerance, r.initGroups, r.finalGroups, r.ticks)
+}
+
+type ModelRuns []ModelRun
+
 // global variables
-var w *csv.Writer
+var w *bufio.Writer
 var verbose bool = false
 var writeToFile bool = true
 var vision int
@@ -41,16 +57,20 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 
 	// setup measurement variables
 	successes := 0
-	times := make(stat.IntSlice, numRuns)
-	initGroups := make(stat.IntSlice, numRuns)
-	finalGroups := make(stat.IntSlice, numRuns)
+	times := make(stat.IntSlice, numRuns)       //only used for stat
+	initGroups := make(stat.IntSlice, numRuns)  //only used for stat
+	finalGroups := make(stat.IntSlice, numRuns) //only used for stat
+	results := make([]ModelRun, numRuns)        //aggregate model outcomes
 
 	// open file if necessary
 	if writeToFile {
 		f, err := os.Create(filename)
 		defer f.Close()
-		w = csv.NewWriter(f)
-		err = w.Write([]string{"size", "vision", "tolerance", "init.blocks", "final.blocks", "ticks"})
+
+		w = bufio.NewWriter(f)
+		defer w.Flush()
+
+		_, err = w.WriteString("run,size,vision,tolerance,init.blocks,final.blocks,ticks")
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -60,11 +80,19 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	for run := 0; run < numRuns; run += 1 {
 		//model setup
 		model := setup(size)
-		initGroups[run] = countDistinct(model)
+		r := ModelRun{
+			runNumber:   run + 1,
+			size:        size,
+			vision:      vision,
+			tolerance:   tolerance,
+			initGroups:  countDistinct(model),
+			finalGroups: -1,
+			ticks:       -1}
+
 		ticks := int64(0)
 		if verbose {
 			fmt.Println(model)
-			fmt.Printf("%d distinct groups at start\n", initGroups[run])
+			fmt.Printf("%d distinct groups at start\n", r.initGroups)
 		}
 
 		// model run
@@ -80,20 +108,19 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 		}
 
 		if isConverged(model) {
-			finalGroups[run] = countDistinct(model)
+			r.finalGroups = countDistinct(model)
 			if verbose {
-				fmt.Printf("%d distinct groups at end after %d moves\n", finalGroups[run], ticks)
+				fmt.Printf("%d distinct groups at end after %d moves\n", r.finalGroups, ticks)
 			}
-			times[run] = ticks
+			r.ticks = ticks
 			successes += 1
 		}
 
+		results[run] = r //add run outcomes to total results
+
 		// write to file
 		if writeToFile {
-			w.Write([]string{fmt.Sprint(size), fmt.Sprint(vision), fmt.Sprint(tolerance), fmt.Sprint(initGroups[run]), fmt.Sprint(finalGroups[run]), fmt.Sprint(times[run])})
-
-			w.Flush()
-			err := w.Error()
+			_, err := w.WriteString(fmt.Sprintln(r))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -102,14 +129,18 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 
 	// output statistics to console
 	fmt.Println("Summary statistics:")
+
+	// populating IntSlices for statistics
+	for i := 0; i < len(results); i++ {
+		times[i] = results[i].ticks
+		initGroups[i] = results[i].initGroups
+		finalGroups[i] = results[i].finalGroups
+	}
+
 	fmt.Printf("%d runs reach equilibrium (%.1f%%) in %.1f ticks (s.d.: %.1f)\n", successes,
 		100*float64(successes)/float64(numRuns), stat.Mean(times), stat.Sd(times))
-
 	fmt.Printf("%.1f average initial groups (s.d.: %.1f)\n", stat.Mean(initGroups), stat.Sd(initGroups))
-	// fmt.Printf("DEBUG: initGroups: %v\n", initGroups)
 	fmt.Printf("%.1f average final groups (s.d.: %.1f)\n", stat.Mean(finalGroups), stat.Sd(finalGroups))
-	// fmt.Printf("DEBUG: initGroups: %v\n", finalGroups)
-
 	return
 }
 
@@ -135,6 +166,7 @@ func countDistinct(model []float64) int64 {
 func setup(size int) []float64 {
 	// Return an initialized 1-D Schelling model, a slice of ints limited
 	// to the range [0, 1] of an arbitary size.
+
 	model := make([]float64, size)
 	for i := range model {
 		model[i] = float64(rand.Intn(2))
@@ -144,6 +176,7 @@ func setup(size int) []float64 {
 
 func isConverged(model []float64) bool {
 	// Return true if all agents in the model are happy, else return false.
+
 	for idx := range model {
 		if !isHappy(model, idx) {
 			return false
@@ -199,6 +232,7 @@ func move(model []float64, idx int) {
 	// Move an unhappy agent to new places in the model at random until it is happy.
 	// TODO: Some method of tracking unhappy users could reduce randomness here.
 	// TODO: IIRC, this is slightly more random than the Brandt model. Update comment with clarification.
+
 	tries := 0
 	unhappy := true
 
@@ -225,17 +259,15 @@ func main() {
 	// TODO: flags would be nicer
 
 	var numAgents, numRuns int
+
 	fmt.Print("Number of agents:\t")
 	fmt.Scanln(&numAgents) // TODO: validate input
-	fmt.Printf("numAgents is %d\n", numAgents)
 	fmt.Print("Agent vision:\t\t")
 	fmt.Scanln(&vision)
-	fmt.Printf("vision is %d\n", vision)
 	fmt.Print("Tolerance:\t\t")
 	fmt.Scanln(&tolerance)
-	fmt.Printf("tolerance is %.2f\n", tolerance)
 	fmt.Print("Number of runs:\t")
 	fmt.Scanln(&numRuns)
-	fmt.Printf("numRuns is %d\n", numRuns)
+
 	aggregateRuns(numRuns, numAgents, vision, tolerance, verbose)
 }
