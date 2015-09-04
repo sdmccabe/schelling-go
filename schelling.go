@@ -63,7 +63,7 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	times := make(stat.IntSlice, numRuns)       //only used for stat
 	initGroups := make(stat.IntSlice, numRuns)  //only used for stat
 	finalGroups := make(stat.IntSlice, numRuns) //only used for stat
-	results := make([]modelRun, numRuns)        //aggregate model outcomes
+	results := make(modelRuns, numRuns)         //aggregate model outcomes
 
 	// open file if necessary
 	if writeToFile {
@@ -82,57 +82,10 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 
 	// execute runs
 	for run := 0; run < numRuns; run++ {
-		//model setup
-		model := setup(size)
-		r := modelRun{
-			runNumber:   run + 1,
-			size:        size,
-			vision:      vision,
-			tolerance:   tolerance,
-			initGroups:  countDistinct(model),
-			finalGroups: -1,
-			ticks:       -1}
-
-		ticks := int64(0)
-		if verbose {
-			fmt.Println(model)
-			fmt.Printf("%d distinct groups at start\n", r.initGroups)
-		}
-
-		// model run
-		for !isConverged(model) {
-			step(model)
-			ticks++
-			if int64(ticks) > int64(500*len(model)) { // arbitary number to avoid infinite loops
-				if verbose {
-					fmt.Println("Model failed to stabilize")
-				}
-				break
-			}
-		}
-
-		if isConverged(model) {
-			r.finalGroups = countDistinct(model)
-			if verbose {
-				fmt.Printf("%d distinct groups at end after %d moves\n", r.finalGroups, ticks)
-			}
-			r.ticks = ticks
+		if results.executeModel(run, size) {
 			successes++
 		}
-
-		results[run] = r //add run outcomes to total results
-
-		// write to file
-		if writeToFile {
-			_, err := w.WriteString(fmt.Sprintln(r))
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
 	}
-
-	// output statistics to console
-	fmt.Println("Summary statistics:")
 
 	// populating IntSlices for statistics
 	for i := 0; i < len(results); i++ {
@@ -141,12 +94,67 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 		finalGroups[i] = results[i].finalGroups
 	}
 
+	// output statistics to console
+	fmt.Println("Summary statistics:")
 	fmt.Printf("%d runs reach equilibrium (%.1f%%) in %.1f ticks (s.d.: %.1f)\n", successes,
 		100*float64(successes)/float64(numRuns), stat.Mean(times), stat.Sd(times))
 	fmt.Printf("%.1f average initial groups (s.d.: %.1f)\n", stat.Mean(initGroups), stat.Sd(initGroups))
 	fmt.Printf("%.1f average final groups (s.d.: %.1f)\n", stat.Mean(finalGroups), stat.Sd(finalGroups))
 
 	return
+}
+
+func (s modelRuns) executeModel(run, size int) bool {
+	// Execute one run of the model. Return true if the model converged.
+
+	// model setup
+	model := setup(size)
+	r := modelRun{
+		runNumber:   run + 1,
+		size:        size,
+		vision:      vision,
+		tolerance:   tolerance,
+		initGroups:  countDistinct(model),
+		finalGroups: -1,
+		ticks:       -1}
+
+	ticks := int64(0)
+	if verbose {
+		fmt.Println(model)
+		fmt.Printf("%d distinct groups at start\n", r.initGroups)
+	}
+
+	// model run
+	for !isConverged(model) {
+		step(model)
+		ticks++
+		if int64(ticks) > int64(500*len(model)) { // arbitary number to avoid infinite loops
+			if verbose {
+				fmt.Println("Model failed to stabilize")
+			}
+			break
+		}
+	}
+
+	success := isConverged(model)
+	if success {
+		r.finalGroups = countDistinct(model)
+		if verbose {
+			fmt.Printf("%d distinct groups at end after %d moves\n", r.finalGroups, ticks)
+		}
+		r.ticks = ticks
+	}
+
+	s[run] = r //add run outcomes to total results
+
+	// write to file
+	if writeToFile {
+		_, err := w.WriteString(fmt.Sprintln(r))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	return success
 }
 
 func countDistinct(model []float64) int64 {
