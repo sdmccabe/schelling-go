@@ -18,6 +18,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"github.com/grd/stat"
@@ -26,6 +27,7 @@ import (
 	"math/rand"
 	"os"
 	"sync"
+	"time"
 )
 
 // declare data types
@@ -39,11 +41,29 @@ type modelRun struct {
 	ticks       int64
 }
 
+type modelRuns []modelRun
+type model []int
+
 func (r modelRun) String() string {
 	return fmt.Sprintf("%d,%d,%d,%f,%d,%d,%d", r.runNumber, r.size, r.vision, r.tolerance, r.initGroups, r.finalGroups, r.ticks)
 }
 
-type modelRuns []modelRun
+func (m model) String() string {
+	var buffer bytes.Buffer
+
+	for _, x := range m {
+		if x == 0 {
+			buffer.WriteString("X")
+		} else if x == 1 {
+			buffer.WriteString("O")
+		} else {
+			fmt.Println("Error: Unexpected model element")
+			os.Exit(1)
+		}
+	}
+
+	return buffer.String()
+}
 
 // declare global variables
 var w *bufio.Writer
@@ -57,8 +77,6 @@ var parallel bool
 func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	// Set up environment, perform the desired number of runs,
 	// and output summary statistics
-	// TODO: This function is doing a lot of work, individual model runs
-	// could probably be shunted into a modelRun() function.
 
 	// setup measurement variables
 	successes := 0
@@ -137,14 +155,18 @@ func (s modelRuns) executeModel(run, size int) bool {
 
 	ticks := int64(0)
 	if verbose {
-		fmt.Println(model)
+		fmt.Printf("Run number %d\n", r.runNumber)
 		fmt.Printf("%d distinct groups at start\n", r.initGroups)
+		fmt.Println(model)
 	}
 
 	// model run
 	for !isConverged(model) {
 		step(model)
 		ticks++
+		if verbose {
+			fmt.Println(model)
+		}
 		if int64(ticks) > int64(500*len(model)) { // arbitary number to avoid infinite loops
 			if verbose {
 				fmt.Println("Model failed to stabilize")
@@ -157,7 +179,9 @@ func (s modelRuns) executeModel(run, size int) bool {
 	if success {
 		r.finalGroups = countDistinct(model)
 		if verbose {
+			//fmt.Println(model)
 			fmt.Printf("%d distinct groups at end after %d moves\n", r.finalGroups, ticks)
+			fmt.Println()
 		}
 		r.ticks = ticks
 	}
@@ -172,11 +196,10 @@ func (s modelRuns) executeModel(run, size int) bool {
 		}
 	}
 
-	//fmt.Printf("finished run %d\n", run+1) //debugging statement: confirm asynchrony
 	return success
 }
 
-func countDistinct(model []float64) int64 {
+func countDistinct(model model) int64 {
 	// Identify coherent subpopulations, what Brandt et al call "firewalls."
 
 	val := model[0]
@@ -189,25 +212,26 @@ func countDistinct(model []float64) int64 {
 		}
 	}
 
-	if model[0] == model[len(model)-1] { // wrap around
-		x--
+	if model[0] != model[len(model)-1] { // wrap around
+		x++
 	}
 
 	return x
 }
 
-func setup(size int) []float64 {
+func setup(size int) model {
 	// Return an initialized 1-D Schelling model, a slice of ints limited
 	// to the range [0, 1] of an arbitary size.
+	// why did i make these float64s??
 
-	model := make([]float64, size)
-	for i := range model {
-		model[i] = float64(rand.Intn(2))
+	m := make(model, size)
+	for i := range m {
+		m[i] = rand.Intn(2)
 	}
-	return model
+	return m
 }
 
-func isConverged(model []float64) bool {
+func isConverged(model model) bool {
 	// Return true if all agents in the model are happy, else return false.
 
 	for idx := range model {
@@ -219,7 +243,7 @@ func isConverged(model []float64) bool {
 	return true
 }
 
-func isHappy(model []float64, idx int) bool {
+func isHappy(model model, idx int) bool {
 	// Return true if the proportion of nearby agents of the same type is greater than or equal to
 	// its tolerance threshold. The number of agents examined is given by the vision global variable.
 
@@ -249,11 +273,11 @@ func isHappy(model []float64, idx int) bool {
 	return true
 }
 
-func step(model []float64) {
+func step(model model) {
 	// Using random activation, find an unhappy agent and
 	// tell it to move.
 
-	idx := rand.Intn(len(model)) // might need to be len - 1?
+	idx := rand.Intn(len(model))
 
 	// cycle until you find an unhappy agent
 	for isHappy(model, idx) {
@@ -262,7 +286,7 @@ func step(model []float64) {
 	move(model, idx)
 }
 
-func move(model []float64, idx int) {
+func move(model model, idx int) {
 	// Move an unhappy agent to new places in the model at random until it is happy.
 	// TODO: Some method of tracking unhappy users could reduce randomness here.
 	// TODO: IIRC, this is slightly more random than the Brandt model. Update comment with clarification.
@@ -288,6 +312,9 @@ func move(model []float64, idx int) {
 }
 
 func main() {
+	// seed RNG
+	rand.Seed(time.Now().UTC().UnixNano())
+
 	// initialize model variables from console input
 	var numAgents, numRuns int
 
@@ -319,6 +346,10 @@ func main() {
 	}
 	if vision > numAgents {
 		fmt.Println("Error: vision cannot be greater than the number of agents.")
+		os.Exit(1)
+	}
+	if verbose && parallel {
+		fmt.Println("Error: verbose and parallel cannot be enabled at the same time.")
 		os.Exit(1)
 	}
 	if filename == "" {
