@@ -21,11 +21,13 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"github.com/davecheney/profile"
 	"github.com/grd/stat"
 	"log"
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -119,7 +121,6 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 			}
 		}
 	}
-
 	wg.Wait() // wait for all model runs to end before computing statistics
 
 	// populating IntSlices for statistics
@@ -311,6 +312,7 @@ func move(model model, idx int) {
 }
 
 func main() {
+	defer profile.Start(profile.CPUProfile).Stop()
 	// seed RNG
 	rand.Seed(time.Now().UTC().UnixNano())
 
@@ -353,6 +355,9 @@ func main() {
 	}
 	if filename == "" {
 		writeToFile = false
+	}
+	if parallel {
+		fmt.Printf("GOMAXPROCS = %d\n", runtime.NumCPU())
 	}
 
 	aggregateRuns(numRuns, numAgents, vision, tolerance, verbose)
