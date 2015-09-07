@@ -21,8 +21,8 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"github.com/davecheney/profile"
 	"github.com/grd/stat"
+	"github.com/pkg/profile"
 	"log"
 	"math"
 	"math/rand"
@@ -68,9 +68,10 @@ func (m model) String() string {
 }
 
 // declare global variables
+var profileRun bool
 var w *bufio.Writer
-var verbose = false
-var writeToFile = true
+var verbose bool
+var writeToFile bool
 var vision int
 var tolerance float64
 var filename string
@@ -312,7 +313,6 @@ func move(model model, idx int) {
 }
 
 func main() {
-	defer profile.Start(profile.CPUProfile).Stop()
 	// seed RNG
 	rand.Seed(time.Now().UTC().UnixNano())
 
@@ -326,9 +326,13 @@ func main() {
 	flag.BoolVar(&verbose, "v", false, "verbose console output")
 	flag.StringVar(&filename, "o", "", "filename to write to, if necessary")
 	flag.BoolVar(&parallel, "p", true, "set to false to run single-threaded")
+	flag.BoolVar(&profileRun, "profile", false, "profile application run")
 	flag.Parse()
 
 	// input validation
+	if profileRun {
+		defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+	}
 	if numAgents <= 0 {
 		fmt.Println("Please enter the number of agents to simulate.")
 		os.Exit(1)
