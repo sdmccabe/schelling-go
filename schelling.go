@@ -222,7 +222,6 @@ func countDistinct(model model) int64 {
 func setup(size int) model {
 	// Return an initialized 1-D Schelling model, a slice of ints limited
 	// to the range [0, 1] of an arbitary size.
-	// why did i make these float64s??
 
 	m := make(model, size)
 	for i := range m {
