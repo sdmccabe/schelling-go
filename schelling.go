@@ -24,7 +24,6 @@ import (
 	"github.com/grd/stat"
 	"github.com/pkg/profile"
 	"log"
-	"math"
 	"math/rand"
 	"os"
 	"runtime"
@@ -250,13 +249,13 @@ func isHappy(model model, idx int) bool {
 
 	count := 0
 	for x := 1; x <= vision; x++ {
-		y := int(math.Mod(float64(idx-x), float64(len(model))))
+		y := (idx - x) % len(model)
 		if y < 0 {
 			y += len(model)
 		}
 		count += int(model[y])
 
-		y = int(math.Mod(float64(idx+x), float64(len(model))))
+		y = (idx + x) % len(model)
 		if y < 0 {
 			y += len(model)
 		}
