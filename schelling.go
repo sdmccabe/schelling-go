@@ -75,26 +75,25 @@ var vision int
 var tolerance float64
 var filename string
 var parallel bool
+var numChunks int
 
 func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	// Set up environment, perform the desired number of runs,
 	// and output summary statistics
 
-	// setup measurement variables
+	// set up measurement variables
 	successes := 0
-	times := make(stat.IntSlice, numRuns)       //only used for stat
-	initGroups := make(stat.IntSlice, numRuns)  //only used for stat
-	finalGroups := make(stat.IntSlice, numRuns) //only used for stat
-	results := make(modelRuns, numRuns)         //aggregate model outcomes
+	times := make(stat.IntSlice, 0)       //only used for stat
+	initGroups := make(stat.IntSlice, 0)  //only used for stat
+	finalGroups := make(stat.IntSlice, 0) //only used for stat
 
-	// setup WaitGroup
-	var wg sync.WaitGroup
+	// numChunks := runtime.NumCPU() * 2
+	chunkSize := numRuns / numChunks
+	results := make(chan modelRun, numChunks+1)
 
-	// open file if necessary
 	if writeToFile {
 		f, err := os.Create(filename)
 		defer f.Close()
-
 		w = bufio.NewWriter(f)
 		defer w.Flush()
 
@@ -104,30 +103,50 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 			log.Fatal(err)
 		}
 	}
-
-	// execute runs
-	for run := 0; run < numRuns; run++ {
-		if parallel {
-			wg.Add(1)
-			go func(x, y int) {
-				defer wg.Done()
-				if results.executeModel(x, y) {
+	if parallel {
+		go func() {
+			for {
+				result := <-results
+				if result.ticks != -1 {
 					successes++
 				}
-			}(run, size)
-		} else {
-			if results.executeModel(run, size) {
+				times = append(times, result.ticks)
+				initGroups = append(initGroups, result.initGroups)
+				finalGroups = append(finalGroups, result.finalGroups)
+				if writeToFile {
+					w.WriteString(fmt.Sprintln(result))
+				}
+			}
+		}()
+	}
+	var wg sync.WaitGroup
+	if parallel {
+		wg.Add(numChunks)
+		for i := 0; i < numChunks; i++ {
+			go func(n, s int) {
+				for j := 0; j < n; j++ {
+					results <- runModel(s)
+				}
+				wg.Done()
+			}(chunkSize, size)
+		}
+
+		wg.Wait() // wait for all model runs to end before computing statistics
+	} else {
+		serialResults := make([]modelRun, numRuns)
+		for i := 0; i < numRuns; i++ {
+			serialResults[i] = runModel(size)
+		}
+		// populating IntSlices for statistics
+		for i := 0; i < len(serialResults); i++ {
+			times = append(times, serialResults[i].ticks)
+			if times[i] != -1 {
 				successes++
 			}
+			initGroups = append(initGroups, serialResults[i].initGroups)
+			finalGroups = append(finalGroups, serialResults[i].finalGroups)
 		}
-	}
-	wg.Wait() // wait for all model runs to end before computing statistics
 
-	// populating IntSlices for statistics
-	for i := 0; i < len(results); i++ {
-		times[i] = results[i].ticks
-		initGroups[i] = results[i].initGroups
-		finalGroups[i] = results[i].finalGroups
 	}
 
 	// output statistics to console
@@ -136,17 +155,14 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 		100*float64(successes)/float64(numRuns), stat.Mean(times), stat.Sd(times))
 	fmt.Printf("%.1f average initial groups (s.d.: %.1f)\n", stat.Mean(initGroups), stat.Sd(initGroups))
 	fmt.Printf("%.1f average final groups (s.d.: %.1f)\n", stat.Mean(finalGroups), stat.Sd(finalGroups))
-
-	return
 }
 
-func (s modelRuns) executeModel(run, size int) bool {
+func runModel(size int) modelRun {
 	// Execute one run of the model. Return true if the model converged.
 
 	// model setup
 	model := setup(size)
 	r := modelRun{
-		runNumber:   run + 1,
 		size:        size,
 		vision:      vision,
 		tolerance:   tolerance,
@@ -154,7 +170,7 @@ func (s modelRuns) executeModel(run, size int) bool {
 		finalGroups: -1,
 		ticks:       -1}
 
-	ticks := int64(0)
+	ticks := int64(1)
 	if verbose {
 		fmt.Printf("Run number %d\n", r.runNumber)
 		fmt.Printf("%d distinct groups at start\n", r.initGroups)
@@ -172,6 +188,7 @@ func (s modelRuns) executeModel(run, size int) bool {
 			if verbose {
 				fmt.Println("Model failed to stabilize")
 			}
+			ticks = -1
 			break
 		}
 	}
@@ -187,17 +204,7 @@ func (s modelRuns) executeModel(run, size int) bool {
 		r.ticks = ticks
 	}
 
-	s[run] = r //add run outcomes to total results
-
-	// write to file
-	if writeToFile {
-		_, err := w.WriteString(fmt.Sprintln(r))
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	return success
+	return r
 }
 
 func countDistinct(model model) int64 {
@@ -324,13 +331,21 @@ func main() {
 	flag.Float64Var(&tolerance, "t", 0, "agent tolerance")
 	flag.BoolVar(&verbose, "v", false, "verbose console output")
 	flag.StringVar(&filename, "o", "", "filename to write to, if necessary")
-	flag.BoolVar(&parallel, "p", true, "set to false to run single-threaded")
+	flag.IntVar(&numChunks, "p", runtime.NumCPU(), "number of chunks to split the runs into. set to 0 for serial")
 	flag.BoolVar(&profileRun, "profile", false, "profile application run")
 	flag.Parse()
 
 	// input validation
 	if profileRun {
 		defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+	}
+	if numChunks == 0 {
+		fmt.Println("number of chunks must be greater than zero. enter one for serial.")
+	} else if numChunks == 1 {
+		parallel = false
+	} else {
+		parallel = true
+		fmt.Printf("GOMAXPROCS = %d\n", runtime.NumCPU())
 	}
 	if numAgents <= 0 {
 		fmt.Println("Please enter the number of agents to simulate.")
@@ -358,9 +373,8 @@ func main() {
 	}
 	if filename == "" {
 		writeToFile = false
-	}
-	if parallel {
-		fmt.Printf("GOMAXPROCS = %d\n", runtime.NumCPU())
+	} else {
+		writeToFile = true
 	}
 
 	aggregateRuns(numRuns, numAgents, vision, tolerance, verbose)
