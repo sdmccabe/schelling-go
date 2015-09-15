@@ -88,6 +88,9 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	finalGroups := make(stat.IntSlice, 0) //only used for stat
 
 	// numChunks := runtime.NumCPU() * 2
+	if !parallel {
+		numChunks = 1 //avoid compiler warning
+	}
 	chunkSize := numRuns / numChunks
 	results := make(chan modelRun, numChunks+1)
 
@@ -331,7 +334,7 @@ func main() {
 	flag.Float64Var(&tolerance, "t", 0, "agent tolerance")
 	flag.BoolVar(&verbose, "v", false, "verbose console output")
 	flag.StringVar(&filename, "o", "", "filename to write to, if necessary")
-	flag.IntVar(&numChunks, "p", runtime.NumCPU(), "number of chunks to split the runs into. set to 0 for serial")
+	flag.IntVar(&numChunks, "p", runtime.NumCPU(), "number of chunks to split the runs into. set to 1 for serial")
 	flag.BoolVar(&profileRun, "profile", false, "profile application run")
 	flag.Parse()
 
@@ -340,8 +343,6 @@ func main() {
 		defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
 	}
 	if numChunks == 0 {
-		fmt.Println("number of chunks must be greater than zero. enter one for serial.")
-	} else if numChunks == 1 {
 		parallel = false
 	} else {
 		parallel = true
