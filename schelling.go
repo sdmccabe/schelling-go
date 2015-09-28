@@ -126,19 +126,24 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	if parallel {
 		wg.Add(numChunks)
 		for i := 0; i < numChunks; i++ {
-			go func(n, s int) {
+			source := rand.NewSource(time.Now().UnixNano() - int64(20*i)) //feeble effort to keep two goroutines from using the same seed
+			generator := rand.New(source)
+			go func(n, s int, g *rand.Rand) {
 				for j := 0; j < n; j++ {
-					results <- runModel(s)
+					results <- runModel(s, g)
 				}
 				wg.Done()
-			}(chunkSize, size)
+			}(chunkSize, size, generator)
 		}
 
 		wg.Wait() // wait for all model runs to end before computing statistics
 	} else {
+		source := rand.NewSource(time.Now().UnixNano())
+		generator := rand.New(source)
+
 		serialResults := make([]modelRun, numRuns)
 		for i := 0; i < numRuns; i++ {
-			serialResults[i] = runModel(size)
+			serialResults[i] = runModel(size, generator)
 		}
 		// populating IntSlices for statistics
 		for i := 0; i < len(serialResults); i++ {
@@ -160,11 +165,11 @@ func aggregateRuns(numRuns, size, vision int, tolerance float64, verbose bool) {
 	fmt.Printf("%.1f average final groups (s.d.: %.1f)\n", stat.Mean(finalGroups), stat.Sd(finalGroups))
 }
 
-func runModel(size int) modelRun {
+func runModel(size int, generator *rand.Rand) modelRun {
 	// Execute one run of the model. Return true if the model converged.
 
 	// model setup
-	model := setup(size)
+	model := setup(size, generator)
 	r := modelRun{
 		size:        size,
 		vision:      vision,
@@ -182,7 +187,7 @@ func runModel(size int) modelRun {
 
 	// model run
 	for !isConverged(model) {
-		step(model)
+		step(model, generator)
 		ticks++
 		if verbose {
 			fmt.Println(model)
@@ -230,13 +235,13 @@ func countDistinct(model model) int64 {
 	return x
 }
 
-func setup(size int) model {
+func setup(size int, generator *rand.Rand) model {
 	// Return an initialized 1-D Schelling model, a slice of ints limited
 	// to the range [0, 1] of an arbitary size.
 
 	m := make(model, size)
 	for i := range m {
-		m[i] = rand.Intn(2)
+		m[i] = generator.Intn(2)
 	}
 	return m
 }
@@ -283,20 +288,20 @@ func isHappy(model model, idx int) bool {
 	return true
 }
 
-func step(model model) {
+func step(model model, generator *rand.Rand) {
 	// Using random activation, find an unhappy agent and
 	// tell it to move.
 
-	idx := rand.Intn(len(model))
+	idx := generator.Intn(len(model))
 
 	// cycle until you find an unhappy agent
 	for isHappy(model, idx) {
-		idx = rand.Intn(len(model))
+		idx = generator.Intn(len(model))
 	}
-	move(model, idx)
+	move(model, idx, generator)
 }
 
-func move(model model, idx int) {
+func move(model model, idx int, generator *rand.Rand) {
 	// Move an unhappy agent to new places in the model at random until it is happy.
 	// TODO: Some method of tracking unhappy users could reduce randomness here.
 	// TODO: IIRC, this is slightly more random than the Brandt model. Update comment with clarification.
@@ -309,7 +314,7 @@ func move(model model, idx int) {
 
 		val := model[idx]                             // store the agent type
 		model = append(model[:idx], model[idx+1:]...) // delete the model index
-		idx = rand.Intn(len(model))                   // randomly generate a new index
+		idx = generator.Intn(len(model))              // randomly generate a new index
 
 		// the next three lines insert the agent into the new index
 		model = append(model, 0)
